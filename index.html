@@ -38,6 +38,7 @@ button.primary{background:var(--accent);color:#fff;width:100%;margin-top:10px}.s
   <div class="card"><h3>Buscar texto del plano</h3><input id="q" type="text" placeholder="Calle, avenida, sector…"><button class="primary" id="buscarTexto">Buscar</button><div id="results"></div></div>
   <div class="card"><h3>Controles</h3><div class="status">Rueda: zoom · Arrastrar: mover · Doble clic: acercar.</div>
     <div style="display:flex;gap:8px;margin-top:10px"><button id="fit" style="flex:1">Ver todo</button><button id="clear" style="flex:1">Limpiar</button></div>
+    <button id="labels" class="primary" style="margin-top:8px">Etiquetas ampliadas: ON</button>
   </div>
   <div class="card"><h3>Estado</h3><div id="info" class="status">Cargando plano…</div></div>
 </aside>
@@ -89,6 +90,34 @@ function indexTexts(){
   textItems=[...svg.querySelectorAll('text')].filter(el=>!el.closest('defs')).map((el,i)=>({el,i,raw:(el.textContent||'').trim(),n:norm(el.textContent||'')})).filter(x=>x.n);
   $('info').innerHTML=`<span class="good">Plano cargado.</span><br>${textItems.length.toLocaleString('es-PE')} textos del espacio modelo indexados.`;
 }
+let labelsEnhanced=true;
+function enhanceLabels(on=true){
+  labelsEnhanced=on;
+  for(const it of textItems){
+    const el=it.el;
+    if(!el.dataset.origFs) el.dataset.origFs=el.getAttribute('font-size')||'1';
+    const orig=parseFloat(el.dataset.origFs)||1;
+    const raw=it.raw.trim();
+    const shortNumber=/^\d{1,3}$/.test(raw);
+    const mzLike=/^(MZ|MZA|MANZANA)\s*[A-Z0-9-]{0,5}$/i.test(raw);
+    const shortAlpha=/^[A-Z]{1,3}$/.test(raw);
+    const factor=on?(shortNumber||mzLike||shortAlpha?2.8:1.35):1;
+    el.setAttribute('font-size',String(orig*factor));
+    el.setAttribute('fill','#111827');
+    if(on&&(shortNumber||mzLike||shortAlpha)){
+      el.setAttribute('font-weight','700');
+      el.style.paintOrder='stroke fill';
+      el.setAttribute('stroke','#ffffff');
+      el.setAttribute('stroke-width',String(Math.max(orig*.22,.12)));
+      el.setAttribute('stroke-linejoin','round');
+    }else{
+      el.removeAttribute('font-weight');
+      el.setAttribute('stroke','none');
+      el.style.paintOrder='';
+    }
+  }
+  const b=$('labels'); if(b)b.textContent='Etiquetas ampliadas: '+(on?'ON':'OFF');
+}
 function searchText(q){const n=norm(q);if(!n)return[];let a=textItems.filter(x=>x.n===n);if(!a.length)a=textItems.filter(x=>x.n.includes(n));return a.slice(0,100)}
 function renderResults(items){$('results').innerHTML='';if(!items.length){$('results').innerHTML='<div class="status warn" style="margin-top:8px">No encontré coincidencias.</div>';return}items.slice(0,20).forEach((it,i)=>{const d=document.createElement('div');d.className='result';d.innerHTML=`<b>${it.raw}</b><div class="small">Coincidencia ${i+1}</div>`;d.onclick=()=>focusItems([it]);$('results').appendChild(d)})}
 function manzanaCandidates(m){const n=norm(m),forms=new Set([n,`MZ ${n}`,`MZ. ${n}`,`MANZANA ${n}`].map(norm));let a=textItems.filter(x=>forms.has(x.n));if(!a.length)a=textItems.filter(x=>x.n===n||((/MZ|MANZANA/.test(x.n))&&x.n.endsWith(' '+n)));return a}
@@ -107,7 +136,7 @@ async function loadStaticSvg(){
     svg=document.importNode(parsed,true);svg.removeAttribute('width');svg.removeAttribute('height');svg.setAttribute('preserveAspectRatio','xMidYMid meet');
     svg.querySelectorAll('[stroke]').forEach(el=>{if(el.getAttribute('stroke')!=='none')el.setAttribute('stroke','#1f2937')});
     svg.querySelectorAll('text').forEach(el=>{el.setAttribute('fill','#111827');el.setAttribute('stroke','none')});
-    $('svgHost').replaceChildren(svg);$('empty').style.display='none';indexTexts();computeUsefulView();
+    $('svgHost').replaceChildren(svg);$('empty').style.display='none';indexTexts();enhanceLabels(true);computeUsefulView();
     $('fileStatus').innerHTML='<span class="good">plano.svg</span> cargado directamente desde la web.';setStatus('Plano listo','good')
   }catch(e){
     console.error(e);$('fileStatus').innerHTML='<span class="warn">No se pudo mostrar el plano.</span><br>'+String(e.message||e);$('info').innerHTML='<span class="warn">Error al cargar plano.svg.</span>';setStatus('Error de carga','warn')
@@ -115,7 +144,7 @@ async function loadStaticSvg(){
 }
 $('buscarTexto').onclick=()=>{const items=searchText($('q').value);renderResults(items);if(items.length)focusItems([items[0]])};
 $('buscarLote').onclick=findLot;['q','mz','lote'].forEach(id=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')(id==='q'?$('buscarTexto'):$('buscarLote')).click()}));
-$('fit').onclick=$('home').onclick=fit;$('clear').onclick=()=>{clearHits();$('results').innerHTML=''};$('zin').onclick=()=>zoom(.72);$('zout').onclick=()=>zoom(1.38);
+$('fit').onclick=$('home').onclick=fit;$('clear').onclick=()=>{clearHits();$('results').innerHTML=''};$('labels').onclick=()=>enhanceLabels(!labelsEnhanced);$('zin').onclick=()=>zoom(.72);$('zout').onclick=()=>zoom(1.38);
 const stage=$('stage');let drag=null;
 stage.addEventListener('wheel',e=>{e.preventDefault();if(!vb)return;const r=stage.getBoundingClientRect(),px=(e.clientX-r.left)/r.width,py=(e.clientY-r.top)/r.height,cx=vb.x+px*vb.width,cy=vb.y+py*vb.height;zoom(e.deltaY>0?1.16:.86,cx,cy)},{passive:false});
 stage.addEventListener('pointerdown',e=>{if(!vb)return;drag={x:e.clientX,y:e.clientY,vx:vb.x,vy:vb.y};stage.setPointerCapture(e.pointerId);stage.classList.add('dragging')});
