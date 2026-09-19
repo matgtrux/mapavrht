@@ -90,68 +90,94 @@ function indexTexts(){
   textItems=[...svg.querySelectorAll('text')].filter(el=>!el.closest('defs')).map((el,i)=>({el,i,raw:(el.textContent||'').trim(),n:norm(el.textContent||'')})).filter(x=>x.n);
   $('info').innerHTML=`<span class="good">Plano cargado.</span><br>${textItems.length.toLocaleString('es-PE')} textos del espacio modelo indexados.`;
 }
-let labelsEnhanced=true,overlayGroup=null,overlayLabels=[],overlayByIndex=new Map();
+let labelsEnhanced=true,streetsVisible=true,overlayGroup=null,streetGroup=null,overlayLabels=[],streetLabels=[],overlayByIndex=new Map();
+
+function isStreetLabel(text){
+  const s=(text||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  return /^(CALLE|AV\.?|AVENIDA|JR\.?|JIRON|PSJE\.?|PASAJE|PROLONGACION|ALAMEDA|CARRETERA|VIA)\b/.test(s)
+    || /\b(CALLE|AVENIDA|PASAJE|JIRON|PROLONGACION)\b/.test(s);
+}
 
 function updateOverlaySizes(){
-  if(!overlayGroup||!vb||!$('stage'))return;
-  overlayGroup.style.display=labelsEnhanced?'inline':'none';
-  if(!labelsEnhanced)return;
+  if(!svg||!vb||!$('stage'))return;
+  if(overlayGroup)overlayGroup.style.display=labelsEnhanced?'inline':'none';
+  if(streetGroup)streetGroup.style.display=streetsVisible?'inline':'none';
   const upp=Math.max(vb.width/Math.max($('stage').clientWidth,1),vb.height/Math.max($('stage').clientHeight,1));
   for(const o of overlayLabels){
-    const px=o.kind==='major'?14:10;
+    const px=o.kind==='major'?15:11;
     o.el.setAttribute('font-size',String(upp*px));
-    o.el.setAttribute('stroke-width',String(upp*(o.kind==='major'?2.1:1.5)));
+    o.el.setAttribute('stroke-width',String(upp*(o.kind==='major'?2.2:1.5)));
+  }
+  for(const o of streetLabels){
+    o.el.setAttribute('font-size',String(upp*13));
+    o.el.setAttribute('stroke-width',String(upp*1.8));
   }
 }
 
 function buildReadableLabels(){
   if(!svg)return;
   if(overlayGroup)overlayGroup.remove();
-  overlayLabels=[];overlayByIndex.clear();
+  if(streetGroup)streetGroup.remove();
+  overlayLabels=[];streetLabels=[];overlayByIndex.clear();
+
   const rootScreen=svg.getScreenCTM();
   if(!rootScreen)return;
   const inv=rootScreen.inverse();
   const NS='http://www.w3.org/2000/svg';
+
   overlayGroup=document.createElementNS(NS,'g');
   overlayGroup.setAttribute('id','readable-label-overlay');
+  streetGroup=document.createElementNS(NS,'g');
+  streetGroup.setAttribute('id','street-label-overlay');
 
   for(const it of textItems){
     const raw=(it.raw||'').trim();
     const orig=parseFloat(it.el.getAttribute('font-size'))||1;
-    const numeric=/^\d{1,3}$/.test(raw);
-    const shortAlpha=/^[A-Z]{1,3}$/i.test(raw);
-    const mzLike=/^(MZ|MZA|MANZANA)\s*[A-Z0-9-]{0,5}$/i.test(raw);
-    if(!(numeric||shortAlpha||mzLike))continue;
-
     let rect;
     try{rect=it.el.getBoundingClientRect()}catch{continue}
     if(!rect||!Number.isFinite(rect.left)||!Number.isFinite(rect.top))continue;
-    const sx=rect.left+rect.width/2, sy=rect.top+rect.height/2;
-    const p=new DOMPoint(sx,sy).matrixTransform(inv);
+
+    const p=new DOMPoint(rect.left+rect.width/2,rect.top+rect.height/2).matrixTransform(inv);
     if(!Number.isFinite(p.x)||!Number.isFinite(p.y))continue;
+
+    const numeric=/^\d{1,3}$/.test(raw);
+    const shortAlpha=/^[A-Z]{1,3}$/i.test(raw);
+    const mzLike=/^(MZ|MZA|MANZANA)\s*[A-Z0-9-]{0,5}$/i.test(raw);
+    const streetLike=isStreetLabel(raw);
 
     const t=document.createElementNS(NS,'text');
     t.textContent=raw;
-    t.setAttribute('x',String(p.x));
-    t.setAttribute('y',String(p.y));
-    t.setAttribute('text-anchor','middle');
-    t.setAttribute('dominant-baseline','middle');
-    t.setAttribute('fill','#111827');
+    t.setAttribute('x',String(p.x));t.setAttribute('y',String(p.y));
+    t.setAttribute('text-anchor','middle');t.setAttribute('dominant-baseline','middle');
+
+    if(streetLike){
+      t.setAttribute('class','overlay-label street');
+      streetGroup.appendChild(t);
+      streetLabels.push({el:t,source:it,kind:'street'});
+      continue;
+    }
+    if(!(numeric||shortAlpha||mzLike))continue;
+
     const kind=(orig>=2.4||mzLike)?'major':'lot';
     t.setAttribute('class','overlay-label '+kind);
     overlayGroup.appendChild(t);
     const rec={el:t,source:it,kind};
     overlayLabels.push(rec);overlayByIndex.set(it.i,rec);
   }
-  svg.appendChild(overlayGroup);
+
+  svg.appendChild(overlayGroup);svg.appendChild(streetGroup);
   updateOverlaySizes();
-  $('info').innerHTML+=`<br><span class="good">${overlayLabels.length.toLocaleString('es-PE')} etiquetas legibles superpuestas.</span>`;
+  const info=$('info');
+  info.innerHTML+=`<br><span class="good">${overlayLabels.length.toLocaleString('es-PE')} etiquetas legibles.</span><br><span class="good">${streetLabels.length.toLocaleString('es-PE')} nombres de vía detectados.</span>`;
 }
 
 function enhanceLabels(on=true){
-  labelsEnhanced=on;
-  updateOverlaySizes();
+  labelsEnhanced=on;updateOverlaySizes();
   const b=$('labels');if(b)b.textContent='Etiquetas ampliadas: '+(on?'ON':'OFF');
+}
+function toggleStreets(){
+  streetsVisible=!streetsVisible;updateOverlaySizes();
+  const b=$('streets');if(b)b.textContent='Calles: '+(streetsVisible?'ON':'OFF');
 }
 function searchText(q){const n=norm(q);if(!n)return[];let a=textItems.filter(x=>x.n===n);if(!a.length)a=textItems.filter(x=>x.n.includes(n));return a.slice(0,100)}
 function renderResults(items){$('results').innerHTML='';if(!items.length){$('results').innerHTML='<div class="status warn" style="margin-top:8px">No encontré coincidencias.</div>';return}items.slice(0,20).forEach((it,i)=>{const d=document.createElement('div');d.className='result';d.innerHTML=`<b>${it.raw}</b><div class="small">Coincidencia ${i+1}</div>`;d.onclick=()=>focusItems([it]);$('results').appendChild(d)})}
@@ -179,7 +205,7 @@ async function loadStaticSvg(){
 }
 $('buscarTexto').onclick=()=>{const items=searchText($('q').value);renderResults(items);if(items.length)focusItems([items[0]])};
 $('buscarLote').onclick=findLot;['q','mz','lote'].forEach(id=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')(id==='q'?$('buscarTexto'):$('buscarLote')).click()}));
-$('fit').onclick=$('home').onclick=fit;$('clear').onclick=()=>{clearHits();$('results').innerHTML=''};$('labels').onclick=()=>enhanceLabels(!labelsEnhanced);$('zin').onclick=()=>zoom(.72);$('zout').onclick=()=>zoom(1.38);
+$('fit').onclick=$('home').onclick=fit;$('clear').onclick=()=>{clearHits();$('results').innerHTML=''};$('labels').onclick=()=>enhanceLabels(!labelsEnhanced);$('streets').onclick=toggleStreets;$('zin').onclick=()=>zoom(.72);$('zout').onclick=()=>zoom(1.38);
 const stage=$('stage');let drag=null;
 stage.addEventListener('wheel',e=>{e.preventDefault();if(!vb)return;const r=stage.getBoundingClientRect(),px=(e.clientX-r.left)/r.width,py=(e.clientY-r.top)/r.height,cx=vb.x+px*vb.width,cy=vb.y+py*vb.height;zoom(e.deltaY>0?1.16:.86,cx,cy)},{passive:false});
 stage.addEventListener('pointerdown',e=>{if(!vb)return;drag={x:e.clientX,y:e.clientY,vx:vb.x,vy:vb.y};stage.setPointerCapture(e.pointerId);stage.classList.add('dragging')});
