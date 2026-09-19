@@ -1,0 +1,34 @@
+name: Analyze SVG
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  analyze:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Analyze generated SVG
+        run: |
+          node <<'EOF'
+          const fs=require('fs');
+          const s=fs.readFileSync('plano.svg','utf8');
+          const tags=[...s.matchAll(/<text\b([^>]*)>([\s\S]*?)<\/text>/gi)].map(m=>({attrs:m[1],text:m[2].replace(/<[^>]+>/g,'').trim()}));
+          const nums=(name)=>tags.map(t=>{const m=t.attrs.match(new RegExp('\\b'+name+'="([^"]+)"','i'));return m?Number(m[1]):NaN}).filter(Number.isFinite).sort((a,b)=>a-b);
+          const q=(a,p)=>a.length?a[Math.max(0,Math.min(a.length-1,Math.floor((a.length-1)*p)))]:null;
+          const xs=nums('x'),ys=nums('y'),fsz=nums('font-size');
+          const examples=tags.filter(t=>t.text).slice(0,100).map(t=>({text:t.text.slice(0,80),fontSize:(()=>{const m=t.attrs.match(/font-size="([^"]+)"/i);return m?Number(m[1]):null})(),x:(()=>{const m=t.attrs.match(/\bx="([^"]+)"/i);return m?Number(m[1]):null})(),y:(()=>{const m=t.attrs.match(/\by="([^"]+)"/i);return m?Number(m[1]):null})()}));
+          const report={textCount:tags.length,x:{min:xs[0],p01:q(xs,.01),p50:q(xs,.5),p99:q(xs,.99),max:xs.at(-1)},y:{min:ys[0],p01:q(ys,.01),p50:q(ys,.5),p99:q(ys,.99),max:ys.at(-1)},fontSize:{min:fsz[0],p01:q(fsz,.01),p10:q(fsz,.1),p50:q(fsz,.5),p90:q(fsz,.9),p99:q(fsz,.99),max:fsz.at(-1)},examples};
+          fs.writeFileSync('svg-stats.json',JSON.stringify(report,null,2));
+          EOF
+      - name: Commit report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add svg-stats.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Add SVG analysis report"
+          git push
