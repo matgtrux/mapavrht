@@ -1,0 +1,44 @@
+name: Convert DWG to SVG
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  convert:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install converter
+        run: npm install --no-save @mlightcad/libredwg-web@0.7.14
+      - name: Convert plano.dwg to plano.svg
+        run: |
+          cat > convert.mjs <<'EOF'
+          import fs from 'node:fs';
+          import { Dwg_File_Type, LibreDwg } from '@mlightcad/libredwg-web';
+          const buf = fs.readFileSync('plano.dwg');
+          const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+          const engine = await LibreDwg.create('./node_modules/@mlightcad/libredwg-web/wasm');
+          const dwg = engine.dwg_read_data(ab, Dwg_File_Type.DWG);
+          const db = engine.convert(dwg);
+          let svg = engine.dwg_to_svg(db);
+          engine.dwg_free(dwg);
+          svg = svg.replace(/stroke="(?!none)[^"]*"/gi, 'stroke="#1f2937"');
+          svg = svg.replace(/fill="(?!none)[^"]*"/gi, 'fill="#111827"');
+          fs.writeFileSync('plano.svg', svg);
+          console.log('SVG bytes:', Buffer.byteLength(svg));
+          EOF
+          node convert.mjs
+      - name: Commit SVG
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plano.svg
+          git diff --cached --quiet && exit 0
+          git commit -m "Generate plano.svg from DWG"
+          git push
