@@ -27,23 +27,41 @@ function setStatus(t,c=''){$('headerStatus').textContent=t;$('headerStatus').cla
 function applyVB(){if(svg&&vb)svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.width} ${vb.height}`)}
 function fit(){if(!originalVB)return;vb={...originalVB};applyVB()} function zoom(f,cx=null,cy=null){if(!vb)return;const x=cx??vb.x+vb.width/2,y=cy??vb.y+vb.height/2,nw=vb.width*f,nh=vb.height*f;vb={x:x-(x-vb.x)*f,y:y-(y-vb.y)*f,width:nw,height:nh};applyVB()}
 function clearHits(){selected.forEach(el=>el.classList.remove('search-hit'));selected=[]}
-function rootBBox(el){try{const b=el.getBBox(),em=el.getCTM(),sm=svg.getCTM();if(!em||!sm)return b;const m=sm.inverse().multiply(em);const pts=[[b.x,b.y],[b.x+b.width,b.y],[b.x,b.y+b.height],[b.x+b.width,b.y+b.height]].map(([x,y])=>new DOMPoint(x,y).matrixTransform(m));const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);return{x:Math.min(...xs),y:Math.min(...ys),width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys)}}catch{return null}}
-function itemPoint(it){const b=rootBBox(it.el);return b?{x:b.x+b.width/2,y:b.y+b.height/2}:{x:0,y:0}}
-function focusItems(items,p=.22){if(!items.length||!svg)return;clearHits();selected=items.map(x=>x.el);selected.forEach(el=>el.classList.add('search-hit'));let boxes=[];for(const it of items){const b=rootBBox(it.el);if(b)boxes.push(b)}if(!boxes.length)return;let x1=Math.min(...boxes.map(b=>b.x)),y1=Math.min(...boxes.map(b=>b.y)),x2=Math.max(...boxes.map(b=>b.x+b.width)),y2=Math.max(...boxes.map(b=>b.y+b.height));let w=Math.max(x2-x1,originalVB.width*.012),h=Math.max(y2-y1,originalVB.height*.012),pad=Math.max(w,h)*p;w+=pad*2;h+=pad*2;const ar=$('stage').clientWidth/$('stage').clientHeight;if(w/h<ar)w=h*ar;else h=w/ar;vb={x:(x1+x2)/2-w/2,y:(y1+y2)/2-h/2,width:w,height:h};applyVB()}
+function itemPoint(it){
+  const x=parseFloat(it.el.getAttribute('x')), y=parseFloat(it.el.getAttribute('y'));
+  if(Number.isFinite(x)&&Number.isFinite(y)) return {x,y:-y};
+  try{const b=it.el.getBBox();return{x:b.x+b.width/2,y:-(b.y+b.height/2)}}catch{return{x:0,y:0}}
+}
+function textBox(it){
+  const p=itemPoint(it);
+  const fs=parseFloat(it.el.getAttribute('font-size'))||10;
+  const w=Math.max(fs*Math.max((it.raw||'').length*.55,1),fs);
+  return{x:p.x-w/2,y:p.y-fs/2,width:w,height:fs};
+}
+function focusItems(items,p=.22){
+  if(!items.length||!svg)return;
+  clearHits();selected=items.map(x=>x.el);selected.forEach(el=>el.classList.add('search-hit'));
+  const boxes=items.map(textBox);
+  let x1=Math.min(...boxes.map(b=>b.x)),y1=Math.min(...boxes.map(b=>b.y)),x2=Math.max(...boxes.map(b=>b.x+b.width)),y2=Math.max(...boxes.map(b=>b.y+b.height));
+  let w=Math.max(x2-x1,originalVB.width*.006),h=Math.max(y2-y1,originalVB.height*.006),pad=Math.max(w,h)*p;w+=pad*2;h+=pad*2;
+  const ar=$('stage').clientWidth/$('stage').clientHeight;if(w/h<ar)w=h*ar;else h=w/ar;
+  vb={x:(x1+x2)/2-w/2,y:(y1+y2)/2-h/2,width:w,height:h};applyVB()
+}
 function indexTexts(){textItems=[...svg.querySelectorAll('text')].map((el,i)=>({el,i,raw:(el.textContent||'').trim(),n:norm(el.textContent||'')})).filter(x=>x.n);$('info').innerHTML=`<span class="good">Plano cargado.</span><br>${textItems.length.toLocaleString('es-PE')} textos indexados.`;$('lotStatus').textContent='Escribe la manzana y el lote.'}
 function computeContentView(){
   if(!svg||!textItems.length)return;
-  const boxes=[];
-  for(const it of textItems){const b=rootBBox(it.el);if(b&&Number.isFinite(b.x)&&Number.isFinite(b.y)&&Number.isFinite(b.width)&&Number.isFinite(b.height))boxes.push(b)}
-  if(boxes.length<20)return;
-  const xs=boxes.map(b=>b.x+b.width/2).sort((a,b)=>a-b),ys=boxes.map(b=>b.y+b.height/2).sort((a,b)=>a-b);
+  const pts=textItems.map(itemPoint).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)&&!(p.x===0&&p.y===0));
+  if(pts.length<20)return;
+  const xs=pts.map(p=>p.x).sort((a,b)=>a-b),ys=pts.map(p=>p.y).sort((a,b)=>a-b);
   const q=(arr,p)=>arr[Math.max(0,Math.min(arr.length-1,Math.floor((arr.length-1)*p)))];
-  const xlo=q(xs,.01),xhi=q(xs,.99),ylo=q(ys,.01),yhi=q(ys,.99);
-  const core=boxes.filter(b=>{const x=b.x+b.width/2,y=b.y+b.height/2;return x>=xlo&&x<=xhi&&y>=ylo&&y<=yhi});
-  if(!core.length)return;
-  let x1=Math.min(...core.map(b=>b.x)),y1=Math.min(...core.map(b=>b.y)),x2=Math.max(...core.map(b=>b.x+b.width)),y2=Math.max(...core.map(b=>b.y+b.height));
-  const w=x2-x1,h=y2-y1,pad=Math.max(w,h)*.035;
-  originalVB={x:x1-pad,y:y1-pad,width:w+pad*2,height:h+pad*2};vb={...originalVB};applyVB();
+  let x1=q(xs,.01),x2=q(xs,.99),y1=q(ys,.01),y2=q(ys,.99);
+  let w=x2-x1,h=y2-y1;
+  if(!(w>0&&h>0))return;
+  const pad=Math.max(w,h)*.04;
+  x1-=pad;y1-=pad;w+=pad*2;h+=pad*2;
+  const ar=$('stage').clientWidth/$('stage').clientHeight;if(w/h<ar)w=h*ar;else h=w/ar;
+  originalVB={x:(x1+x2)/2-w/2,y:(y1+y2)/2-h/2,width:w,height:h};
+  vb={...originalVB};applyVB();
 }
 function searchText(q){const n=norm(q);if(!n)return[];let a=textItems.filter(x=>x.n===n);if(!a.length)a=textItems.filter(x=>x.n.includes(n));return a.slice(0,80)}
 function renderResults(items){$('results').innerHTML='';if(!items.length){$('results').innerHTML='<div class="status warn" style="margin-top:8px">No encontré coincidencias.</div>';return}items.slice(0,20).forEach((it,i)=>{const d=document.createElement('div');d.className='result';d.innerHTML=`<b>${it.raw}</b><div class="small">Coincidencia ${i+1}</div>`;d.onclick=()=>focusItems([it]);$('results').appendChild(d)})}
