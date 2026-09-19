@@ -19,7 +19,7 @@ button.primary{background:var(--accent);color:#fff;width:100%;margin-top:10px}.s
 #svgHost{width:100%;height:100%}#svgHost svg{width:100%;height:100%;display:block;background:#fff}.toolbar{position:absolute;right:14px;top:14px;display:flex;flex-direction:column;gap:7px;z-index:4}
 .toolbar button{width:42px;height:42px;padding:0;font-size:20px;background:#fff;box-shadow:0 2px 12px #0002}.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--muted)}
 .result{font-size:12px;background:#f8fafc;border:1px solid var(--border);border-radius:9px;padding:9px;margin-top:8px;cursor:pointer}.result:hover{background:#eef4ff}.small{font-size:11px;color:var(--muted)}
-.search-hit{fill:#e11d48!important;stroke:#e11d48!important;font-weight:900!important}
+.search-hit{fill:#e11d48!important;stroke:#e11d48!important;font-weight:900!important}.overlay-label{pointer-events:none;paint-order:stroke fill;stroke:#fff;stroke-linejoin:round;font-family:Arial,sans-serif}.overlay-label.major{font-weight:800}.overlay-label.lot{font-weight:700}.overlay-label.overlay-hit{fill:#e11d48!important;stroke:#fff!important}
 @media(max-width:780px){.shell{grid-template-columns:1fr;grid-template-rows:auto 1fr}aside{border-right:0;border-bottom:1px solid var(--border);padding:10px;max-height:44vh}.title{font-size:15px}}
 </style>
 </head>
@@ -53,10 +53,10 @@ const norm=s=>(s??'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
 let svg=null, originalVB=null, vb=null, textItems=[], selected=[];
 
 function setStatus(t,c=''){$('headerStatus').textContent=t;$('headerStatus').className='subtitle '+c}
-function applyVB(){if(svg&&vb)svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.width} ${vb.height}`)}
+function applyVB(){if(svg&&vb){svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.width} ${vb.height}`);updateOverlaySizes()}}
 function fit(){if(!originalVB)return;vb={...originalVB};applyVB()}
 function zoom(f,cx=null,cy=null){if(!vb)return;const x=cx??vb.x+vb.width/2,y=cy??vb.y+vb.height/2;vb={x:x-(x-vb.x)*f,y:y-(y-vb.y)*f,width:vb.width*f,height:vb.height*f};applyVB()}
-function clearHits(){selected.forEach(el=>el.classList.remove('search-hit'));selected=[]}
+function clearHits(){selected.forEach(el=>el.classList.remove('search-hit'));selected=[];overlayLabels.forEach(o=>o.el.classList.remove('overlay-hit'))}
 
 function textPoint(it){
   const x=parseFloat(it.el.getAttribute('x')), y=parseFloat(it.el.getAttribute('y'));
@@ -68,7 +68,7 @@ function textBox(it){
   return{x:p.x-w/2,y:p.y-fs/2,width:w,height:fs}
 }
 function focusItems(items,p=.65){
-  if(!items.length||!svg)return;clearHits();selected=items.map(x=>x.el);selected.forEach(el=>el.classList.add('search-hit'));
+  if(!items.length||!svg)return;clearHits();selected=items.map(x=>x.el);selected.forEach(el=>el.classList.add('search-hit'));items.forEach(it=>{const o=overlayByIndex.get(it.i);if(o)o.el.classList.add('overlay-hit')});
   const boxes=items.map(textBox).filter(b=>Number.isFinite(b.x)&&Number.isFinite(b.y));if(!boxes.length)return;
   let x1=Math.min(...boxes.map(b=>b.x)),y1=Math.min(...boxes.map(b=>b.y)),x2=Math.max(...boxes.map(b=>b.x+b.width)),y2=Math.max(...boxes.map(b=>b.y+b.height));
   let w=Math.max(x2-x1,originalVB.width*.01),h=Math.max(y2-y1,originalVB.height*.01),pad=Math.max(w,h)*p;w+=pad*2;h+=pad*2;
@@ -90,33 +90,68 @@ function indexTexts(){
   textItems=[...svg.querySelectorAll('text')].filter(el=>!el.closest('defs')).map((el,i)=>({el,i,raw:(el.textContent||'').trim(),n:norm(el.textContent||'')})).filter(x=>x.n);
   $('info').innerHTML=`<span class="good">Plano cargado.</span><br>${textItems.length.toLocaleString('es-PE')} textos del espacio modelo indexados.`;
 }
-let labelsEnhanced=true;
+let labelsEnhanced=true,overlayGroup=null,overlayLabels=[],overlayByIndex=new Map();
+
+function updateOverlaySizes(){
+  if(!overlayGroup||!vb||!$('stage'))return;
+  overlayGroup.style.display=labelsEnhanced?'inline':'none';
+  if(!labelsEnhanced)return;
+  const upp=Math.max(vb.width/Math.max($('stage').clientWidth,1),vb.height/Math.max($('stage').clientHeight,1));
+  for(const o of overlayLabels){
+    const px=o.kind==='major'?14:10;
+    o.el.setAttribute('font-size',String(upp*px));
+    o.el.setAttribute('stroke-width',String(upp*(o.kind==='major'?2.1:1.5)));
+  }
+}
+
+function buildReadableLabels(){
+  if(!svg)return;
+  if(overlayGroup)overlayGroup.remove();
+  overlayLabels=[];overlayByIndex.clear();
+  const rootScreen=svg.getScreenCTM();
+  if(!rootScreen)return;
+  const inv=rootScreen.inverse();
+  const NS='http://www.w3.org/2000/svg';
+  overlayGroup=document.createElementNS(NS,'g');
+  overlayGroup.setAttribute('id','readable-label-overlay');
+
+  for(const it of textItems){
+    const raw=(it.raw||'').trim();
+    const orig=parseFloat(it.el.getAttribute('font-size'))||1;
+    const numeric=/^\d{1,3}$/.test(raw);
+    const shortAlpha=/^[A-Z]{1,3}$/i.test(raw);
+    const mzLike=/^(MZ|MZA|MANZANA)\s*[A-Z0-9-]{0,5}$/i.test(raw);
+    if(!(numeric||shortAlpha||mzLike))continue;
+
+    let rect;
+    try{rect=it.el.getBoundingClientRect()}catch{continue}
+    if(!rect||!Number.isFinite(rect.left)||!Number.isFinite(rect.top))continue;
+    const sx=rect.left+rect.width/2, sy=rect.top+rect.height/2;
+    const p=new DOMPoint(sx,sy).matrixTransform(inv);
+    if(!Number.isFinite(p.x)||!Number.isFinite(p.y))continue;
+
+    const t=document.createElementNS(NS,'text');
+    t.textContent=raw;
+    t.setAttribute('x',String(p.x));
+    t.setAttribute('y',String(p.y));
+    t.setAttribute('text-anchor','middle');
+    t.setAttribute('dominant-baseline','middle');
+    t.setAttribute('fill','#111827');
+    const kind=(orig>=2.4||mzLike)?'major':'lot';
+    t.setAttribute('class','overlay-label '+kind);
+    overlayGroup.appendChild(t);
+    const rec={el:t,source:it,kind};
+    overlayLabels.push(rec);overlayByIndex.set(it.i,rec);
+  }
+  svg.appendChild(overlayGroup);
+  updateOverlaySizes();
+  $('info').innerHTML+=`<br><span class="good">${overlayLabels.length.toLocaleString('es-PE')} etiquetas legibles superpuestas.</span>`;
+}
+
 function enhanceLabels(on=true){
   labelsEnhanced=on;
-  for(const it of textItems){
-    const el=it.el;
-    if(!el.dataset.origFs) el.dataset.origFs=el.getAttribute('font-size')||'1';
-    const orig=parseFloat(el.dataset.origFs)||1;
-    const raw=it.raw.trim();
-    const shortNumber=/^\d{1,3}$/.test(raw);
-    const mzLike=/^(MZ|MZA|MANZANA)\s*[A-Z0-9-]{0,5}$/i.test(raw);
-    const shortAlpha=/^[A-Z]{1,3}$/.test(raw);
-    const factor=on?(shortNumber||mzLike||shortAlpha?2.8:1.35):1;
-    el.setAttribute('font-size',String(orig*factor));
-    el.setAttribute('fill','#111827');
-    if(on&&(shortNumber||mzLike||shortAlpha)){
-      el.setAttribute('font-weight','700');
-      el.style.paintOrder='stroke fill';
-      el.setAttribute('stroke','#ffffff');
-      el.setAttribute('stroke-width',String(Math.max(orig*.22,.12)));
-      el.setAttribute('stroke-linejoin','round');
-    }else{
-      el.removeAttribute('font-weight');
-      el.setAttribute('stroke','none');
-      el.style.paintOrder='';
-    }
-  }
-  const b=$('labels'); if(b)b.textContent='Etiquetas ampliadas: '+(on?'ON':'OFF');
+  updateOverlaySizes();
+  const b=$('labels');if(b)b.textContent='Etiquetas ampliadas: '+(on?'ON':'OFF');
 }
 function searchText(q){const n=norm(q);if(!n)return[];let a=textItems.filter(x=>x.n===n);if(!a.length)a=textItems.filter(x=>x.n.includes(n));return a.slice(0,100)}
 function renderResults(items){$('results').innerHTML='';if(!items.length){$('results').innerHTML='<div class="status warn" style="margin-top:8px">No encontré coincidencias.</div>';return}items.slice(0,20).forEach((it,i)=>{const d=document.createElement('div');d.className='result';d.innerHTML=`<b>${it.raw}</b><div class="small">Coincidencia ${i+1}</div>`;d.onclick=()=>focusItems([it]);$('results').appendChild(d)})}
@@ -136,7 +171,7 @@ async function loadStaticSvg(){
     svg=document.importNode(parsed,true);svg.removeAttribute('width');svg.removeAttribute('height');svg.setAttribute('preserveAspectRatio','xMidYMid meet');
     svg.querySelectorAll('[stroke]').forEach(el=>{if(el.getAttribute('stroke')!=='none')el.setAttribute('stroke','#1f2937')});
     svg.querySelectorAll('text').forEach(el=>{el.setAttribute('fill','#111827');el.setAttribute('stroke','none')});
-    $('svgHost').replaceChildren(svg);$('empty').style.display='none';indexTexts();enhanceLabels(true);computeUsefulView();
+    $('svgHost').replaceChildren(svg);$('empty').style.display='none';indexTexts();computeUsefulView();requestAnimationFrame(()=>requestAnimationFrame(()=>{buildReadableLabels();enhanceLabels(true)}));
     $('fileStatus').innerHTML='<span class="good">plano.svg</span> cargado directamente desde la web.';setStatus('Plano listo','good')
   }catch(e){
     console.error(e);$('fileStatus').innerHTML='<span class="warn">No se pudo mostrar el plano.</span><br>'+String(e.message||e);$('info').innerHTML='<span class="warn">Error al cargar plano.svg.</span>';setStatus('Error de carga','warn')
