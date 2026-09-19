@@ -38,7 +38,7 @@ button.primary{background:var(--accent);color:#fff;width:100%;margin-top:10px}.s
   <div class="card"><h3>Buscar texto del plano</h3><input id="q" type="text" placeholder="Calle, avenida, sector…"><button class="primary" id="buscarTexto">Buscar</button><div id="results"></div></div>
   <div class="card"><h3>Controles</h3><div class="status">Rueda: zoom · Arrastrar: mover · Doble clic: acercar.</div>
     <div style="display:flex;gap:8px;margin-top:10px"><button id="fit" style="flex:1">Ver todo</button><button id="clear" style="flex:1">Limpiar</button></div>
-    <button id="labels" class="primary" style="margin-top:8px">Etiquetas ampliadas: ON</button><button id="streets" class="primary" style="margin-top:8px">Calles: ON</button>
+    <button id="labels" class="primary" style="margin-top:8px">Etiquetas adaptativas: ON</button><button id="streets" class="primary" style="margin-top:8px">Calles: ON</button>
   </div>
   <div class="card"><h3>Estado</h3><div id="info" class="status">Cargando plano…</div></div>
 </aside>
@@ -76,7 +76,7 @@ function textBox(it){
   return{x:p.x-w/2,y:p.y-fs/2,width:w,height:fs}
 }
 function focusItems(items,p=.65){
-  if(!items.length||!svg)return;clearHits();selected=items.map(x=>x.el);selected.forEach(el=>el.classList.add('search-hit'));items.forEach(it=>{const o=overlayByIndex.get(it.i);if(o)o.el.classList.add('overlay-hit')});
+  if(!items.length||!svg)return;clearHits();selected=items.map(x=>x.el);selected.forEach(el=>el.classList.add('search-hit'));items.forEach(it=>{const o=overlayByIndex.get(it.i);if(o)o.el.classList.add('overlay-hit')});updateOverlaySizes();
   const boxes=items.map(textBox).filter(b=>Number.isFinite(b.x)&&Number.isFinite(b.y));if(!boxes.length)return;
   let x1=Math.min(...boxes.map(b=>b.x)),y1=Math.min(...boxes.map(b=>b.y)),x2=Math.max(...boxes.map(b=>b.x+b.width)),y2=Math.max(...boxes.map(b=>b.y+b.height));
   let w=Math.max(x2-x1,originalVB.width*.025),h=Math.max(y2-y1,originalVB.height*.025),pad=Math.max(w,h)*Math.max(p,.9);w+=pad*2;h+=pad*2;
@@ -102,29 +102,40 @@ let labelsEnhanced=true,streetsVisible=true,overlayGroup=null,streetGroup=null,o
 
 function isStreetLabel(text,orig=1){
   const s=(text||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  if(/^(CALLE|AV\.?|AVENIDA|JR\.?|JIRON|PSJE\.?|PASAJE|PROLONGACION|ALAMEDA|CARRETERA|VIA)\b/.test(s)
+  if(/^(CA\.?|CALLE|AV\.?|AVENIDA|JR\.?|JIRON|PSJE\.?|PASAJE|PROLONGACION|ALAMEDA|CARRETERA|VIA)\b/.test(s)
     || /\b(CALLE|AVENIDA|PASAJE|JIRON|PROLONGACION)\b/.test(s)) return true;
-  const excluded=/^(CONTROL|CALIDAD|APROBACION|TECNICO|RESPONSABLE|PROVINCIA|DEPARTAMENTO|DISTRITO|UBIGEO|ESCALA|FECHA|PLANO|CAD|TOPOGRAFIA|LEGAL|ARQUITECTO|ABOGADO|LEYENDA|SECTOR|LOTE|AREA|MZ|MANZANA|SISTEMA|HEMISFERIO|DATUM|TRUJILLO|HUANCHACO|LA LIBERTAD)$/;
-  const bareName=/^[A-ZÑÁÉÍÓÚ][A-ZÑÁÉÍÓÚ .'-]{3,32}$/i.test((text||'').trim());
-  return bareName && orig>=1.4 && !excluded.test(s);
+  const excluded=/^(CONTROL|CALIDAD|APROBACION|TECNICO|RESPONSABLE|PROVINCIA|DEPARTAMENTO|DISTRITO|UBIGEO|ESCALA|FECHA|PLANO|CAD|TOPOGRAFIA|LEGAL|ARQUITECTO|ABOGADO|LEYENDA|SECTOR|LOTE|AREA|MZ|MANZANA|SISTEMA|HEMISFERIO|DATUM|TRUJILLO|HUANCHACO|LA LIBERTAD|PROPIEDAD|COMERCIO|TERCEROS|POSESION|CONSTRUCCION)$/;
+  const raw=(text||'').trim();
+  const bareName=/^[A-ZÑÁÉÍÓÚ][A-ZÑÁÉÍÓÚ .'-]{3,28}$/i.test(raw);
+  const words=raw.split(/\s+/).length;
+  return bareName && words<=4 && orig>=3.2 && !excluded.test(s);
 }
 
 function updateOverlaySizes(){
   if(!svg||!vb||!$('stage'))return;
   if(overlayGroup)overlayGroup.style.display=labelsEnhanced?'inline':'none';
   if(streetGroup)streetGroup.style.display=streetsVisible?'inline':'none';
+
   const upp=Math.max(vb.width/Math.max($('stage').clientWidth,1),vb.height/Math.max($('stage').clientHeight,1));
+  const zoomLevel=originalVB&&vb.width>0?originalVB.width/vb.width:1;
+
   for(const o of overlayLabels){
-    const px=o.kind==='major'?15:11;
+    const forced=o.el.classList.contains('overlay-hit');
+    const visible=forced || (labelsEnhanced && (o.kind==='major'?zoomLevel>=1.5:zoomLevel>=4.2));
+    o.el.style.display=visible?'inline':'none';
+    const px=forced?18:(o.kind==='major'?15:11);
     o.el.setAttribute('font-size',String(upp*px));
-    o.el.setAttribute('stroke-width',String(upp*(o.kind==='major'?2.2:1.5)));
+    o.el.setAttribute('stroke-width',String(upp*(forced?2.6:(o.kind==='major'?2.2:1.5))));
   }
+
   for(const o of streetLabels){
-    o.el.setAttribute('font-size',String(upp*13));
+    const visible=streetsVisible && zoomLevel>=(o.orig>=3.5?1.7:2.8);
+    o.el.style.display=visible?'inline':'none';
+    const px=o.orig>=3.5?13:11;
+    o.el.setAttribute('font-size',String(upp*px));
     o.el.setAttribute('stroke-width',String(upp*1.8));
   }
 }
-
 function buildReadableLabels(){
   if(!svg)return;
   if(overlayGroup)overlayGroup.remove();
@@ -160,7 +171,7 @@ function buildReadableLabels(){
     if(streetLike){
       t.setAttribute('class','overlay-label street');
       streetGroup.appendChild(t);
-      streetLabels.push({el:t,source:it,kind:'street'});
+      streetLabels.push({el:t,source:it,kind:'street',orig});
       continue;
     }
     if(!(numeric||shortAlpha||mzLike))continue;
@@ -168,7 +179,7 @@ function buildReadableLabels(){
     const kind=(orig>=2.4||mzLike)?'major':'lot';
     t.setAttribute('class','overlay-label '+kind);
     overlayGroup.appendChild(t);
-    const rec={el:t,source:it,kind};
+    const rec={el:t,source:it,kind,orig};
     overlayLabels.push(rec);overlayByIndex.set(it.i,rec);
   }
 
@@ -180,7 +191,7 @@ function buildReadableLabels(){
 
 function enhanceLabels(on=true){
   labelsEnhanced=on;updateOverlaySizes();
-  const b=$('labels');if(b)b.textContent='Etiquetas ampliadas: '+(on?'ON':'OFF');
+  const b=$('labels');if(b)b.textContent='Etiquetas adaptativas: '+(on?'ON':'OFF');
 }
 function toggleStreets(){
   streetsVisible=!streetsVisible;updateOverlaySizes();
