@@ -1,0 +1,25 @@
+name: Fetch LibreDWG WASM
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fetch-wasm:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download LibreDWG WASM
+        run: |
+          curl -L --fail --retry 3 -o libredwg-web.wasm "https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/wasm/libredwg-web.wasm"
+          test -s libredwg-web.wasm
+      - name: Commit WASM
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add libredwg-web.wasm
+          git diff --cached --quiet && exit 0
+          git commit -m "Add LibreDWG WebAssembly runtime"
+          git push
