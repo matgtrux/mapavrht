@@ -27,15 +27,16 @@ function setStatus(t,c=''){$('headerStatus').textContent=t;$('headerStatus').cla
 function applyVB(){if(svg&&vb)svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.width} ${vb.height}`)}
 function fit(){if(!originalVB)return;vb={...originalVB};applyVB()} function zoom(f,cx=null,cy=null){if(!vb)return;const x=cx??vb.x+vb.width/2,y=cy??vb.y+vb.height/2,nw=vb.width*f,nh=vb.height*f;vb={x:x-(x-vb.x)*f,y:y-(y-vb.y)*f,width:nw,height:nh};applyVB()}
 function clearHits(){selected.forEach(el=>el.classList.remove('search-hit'));selected=[]}
-function itemPoint(it){try{const b=it.el.getBBox();return{x:b.x+b.width/2,y:b.y+b.height/2}}catch{return{x:0,y:0}}}
-function focusItems(items,p=.22){if(!items.length||!svg)return;clearHits();selected=items.map(x=>x.el);selected.forEach(el=>el.classList.add('search-hit'));let boxes=[];for(const it of items){try{boxes.push(it.el.getBBox())}catch{}}if(!boxes.length)return;let x1=Math.min(...boxes.map(b=>b.x)),y1=Math.min(...boxes.map(b=>b.y)),x2=Math.max(...boxes.map(b=>b.x+b.width)),y2=Math.max(...boxes.map(b=>b.y+b.height));let w=Math.max(x2-x1,originalVB.width*.012),h=Math.max(y2-y1,originalVB.height*.012),pad=Math.max(w,h)*p;w+=pad*2;h+=pad*2;const ar=$('stage').clientWidth/$('stage').clientHeight;if(w/h<ar)w=h*ar;else h=w/ar;vb={x:(x1+x2)/2-w/2,y:(y1+y2)/2-h/2,width:w,height:h};applyVB()}
+function rootBBox(el){try{const b=el.getBBox(),m=el.getCTM();if(!m)return b;const pts=[[b.x,b.y],[b.x+b.width,b.y],[b.x,b.y+b.height],[b.x+b.width,b.y+b.height]].map(([x,y])=>new DOMPoint(x,y).matrixTransform(m));const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);return{x:Math.min(...xs),y:Math.min(...ys),width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys)}}catch{return null}}
+function itemPoint(it){const b=rootBBox(it.el);return b?{x:b.x+b.width/2,y:b.y+b.height/2}:{x:0,y:0}}
+function focusItems(items,p=.22){if(!items.length||!svg)return;clearHits();selected=items.map(x=>x.el);selected.forEach(el=>el.classList.add('search-hit'));let boxes=[];for(const it of items){const b=rootBBox(it.el);if(b)boxes.push(b)}if(!boxes.length)return;let x1=Math.min(...boxes.map(b=>b.x)),y1=Math.min(...boxes.map(b=>b.y)),x2=Math.max(...boxes.map(b=>b.x+b.width)),y2=Math.max(...boxes.map(b=>b.y+b.height));let w=Math.max(x2-x1,originalVB.width*.012),h=Math.max(y2-y1,originalVB.height*.012),pad=Math.max(w,h)*p;w+=pad*2;h+=pad*2;const ar=$('stage').clientWidth/$('stage').clientHeight;if(w/h<ar)w=h*ar;else h=w/ar;vb={x:(x1+x2)/2-w/2,y:(y1+y2)/2-h/2,width:w,height:h};applyVB()}
 function indexTexts(){textItems=[...svg.querySelectorAll('text')].map((el,i)=>({el,i,raw:(el.textContent||'').trim(),n:norm(el.textContent||'')})).filter(x=>x.n);$('info').innerHTML=`<span class="good">Plano cargado.</span><br>${textItems.length.toLocaleString('es-PE')} textos indexados.`;$('lotStatus').textContent='Escribe la manzana y el lote.'}
 function computeContentView(){
   if(!svg||!textItems.length)return;
   const boxes=[];
-  for(const it of textItems){try{const b=it.el.getBBox();if(Number.isFinite(b.x)&&Number.isFinite(b.y)&&Number.isFinite(b.width)&&Number.isFinite(b.height))boxes.push(b)}catch{}}
+  for(const it of textItems){const b=rootBBox(it.el);if(b&&Number.isFinite(b.x)&&Number.isFinite(b.y)&&Number.isFinite(b.width)&&Number.isFinite(b.height))boxes.push(b)}
   if(boxes.length<20)return;
-  const xs=boxes.map(b=>b.x+b.width/2).sort((a,b)=>a-b), ys=boxes.map(b=>b.y+b.height/2).sort((a,b)=>a-b);
+  const xs=boxes.map(b=>b.x+b.width/2).sort((a,b)=>a-b),ys=boxes.map(b=>b.y+b.height/2).sort((a,b)=>a-b);
   const q=(arr,p)=>arr[Math.max(0,Math.min(arr.length-1,Math.floor((arr.length-1)*p)))];
   const xlo=q(xs,.01),xhi=q(xs,.99),ylo=q(ys,.01),yhi=q(ys,.99);
   const core=boxes.filter(b=>{const x=b.x+b.width/2,y=b.y+b.height/2;return x>=xlo&&x<=xhi&&y>=ylo&&y<=yhi});
