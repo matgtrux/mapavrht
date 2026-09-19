@@ -59,9 +59,17 @@ function zoom(f,cx=null,cy=null){if(!vb)return;const x=cx??vb.x+vb.width/2,y=cy?
 function clearHits(){selected.forEach(el=>el.classList.remove('search-hit'));selected=[];overlayLabels.forEach(o=>o.el.classList.remove('overlay-hit'))}
 
 function textPoint(it){
-  const x=parseFloat(it.el.getAttribute('x')), y=parseFloat(it.el.getAttribute('y'));
-  if(Number.isFinite(x)&&Number.isFinite(y)) return {x,y:-y};
-  try{const b=it.el.getBBox();return{x:b.x+b.width/2,y:-(b.y+b.height/2)}}catch{return{x:NaN,y:NaN}}
+  if(!svg||!it?.el)return{x:NaN,y:NaN};
+  try{
+    const rect=it.el.getBoundingClientRect();
+    const root=svg.getScreenCTM();
+    if(root&&Number.isFinite(rect.left)&&Number.isFinite(rect.top)){
+      const p=new DOMPoint(rect.left+rect.width/2,rect.top+rect.height/2).matrixTransform(root.inverse());
+      if(Number.isFinite(p.x)&&Number.isFinite(p.y))return{x:p.x,y:p.y};
+    }
+  }catch{}
+  const x=parseFloat(it.el.getAttribute('x')),y=parseFloat(it.el.getAttribute('y'));
+  return Number.isFinite(x)&&Number.isFinite(y)?{x,y:-y}:{x:NaN,y:NaN};
 }
 function textBox(it){
   const p=textPoint(it),fs=parseFloat(it.el.getAttribute('font-size'))||8,w=Math.max(fs*Math.max((it.raw||'').length*.55,1),fs);
@@ -71,7 +79,7 @@ function focusItems(items,p=.65){
   if(!items.length||!svg)return;clearHits();selected=items.map(x=>x.el);selected.forEach(el=>el.classList.add('search-hit'));items.forEach(it=>{const o=overlayByIndex.get(it.i);if(o)o.el.classList.add('overlay-hit')});
   const boxes=items.map(textBox).filter(b=>Number.isFinite(b.x)&&Number.isFinite(b.y));if(!boxes.length)return;
   let x1=Math.min(...boxes.map(b=>b.x)),y1=Math.min(...boxes.map(b=>b.y)),x2=Math.max(...boxes.map(b=>b.x+b.width)),y2=Math.max(...boxes.map(b=>b.y+b.height));
-  let w=Math.max(x2-x1,originalVB.width*.01),h=Math.max(y2-y1,originalVB.height*.01),pad=Math.max(w,h)*p;w+=pad*2;h+=pad*2;
+  let w=Math.max(x2-x1,originalVB.width*.025),h=Math.max(y2-y1,originalVB.height*.025),pad=Math.max(w,h)*Math.max(p,.9);w+=pad*2;h+=pad*2;
   const ar=$('stage').clientWidth/$('stage').clientHeight;if(w/h<ar)w=h*ar;else h=w/ar;
   vb={x:(x1+x2)/2-w/2,y:(y1+y2)/2-h/2,width:w,height:h};applyVB()
 }
@@ -92,10 +100,13 @@ function indexTexts(){
 }
 let labelsEnhanced=true,streetsVisible=true,overlayGroup=null,streetGroup=null,overlayLabels=[],streetLabels=[],overlayByIndex=new Map();
 
-function isStreetLabel(text){
+function isStreetLabel(text,orig=1){
   const s=(text||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  return /^(CALLE|AV\.?|AVENIDA|JR\.?|JIRON|PSJE\.?|PASAJE|PROLONGACION|ALAMEDA|CARRETERA|VIA)\b/.test(s)
-    || /\b(CALLE|AVENIDA|PASAJE|JIRON|PROLONGACION)\b/.test(s);
+  if(/^(CALLE|AV\.?|AVENIDA|JR\.?|JIRON|PSJE\.?|PASAJE|PROLONGACION|ALAMEDA|CARRETERA|VIA)\b/.test(s)
+    || /\b(CALLE|AVENIDA|PASAJE|JIRON|PROLONGACION)\b/.test(s)) return true;
+  const excluded=/^(CONTROL|CALIDAD|APROBACION|TECNICO|RESPONSABLE|PROVINCIA|DEPARTAMENTO|DISTRITO|UBIGEO|ESCALA|FECHA|PLANO|CAD|TOPOGRAFIA|LEGAL|ARQUITECTO|ABOGADO|LEYENDA|SECTOR|LOTE|AREA|MZ|MANZANA|SISTEMA|HEMISFERIO|DATUM|TRUJILLO|HUANCHACO|LA LIBERTAD)$/;
+  const bareName=/^[A-ZÑÁÉÍÓÚ][A-ZÑÁÉÍÓÚ .'-]{3,32}$/i.test((text||'').trim());
+  return bareName && orig>=1.4 && !excluded.test(s);
 }
 
 function updateOverlaySizes(){
@@ -133,17 +144,13 @@ function buildReadableLabels(){
   for(const it of textItems){
     const raw=(it.raw||'').trim();
     const orig=parseFloat(it.el.getAttribute('font-size'))||1;
-    let rect;
-    try{rect=it.el.getBoundingClientRect()}catch{continue}
-    if(!rect||!Number.isFinite(rect.left)||!Number.isFinite(rect.top))continue;
-
-    const p=new DOMPoint(rect.left+rect.width/2,rect.top+rect.height/2).matrixTransform(inv);
+    const p=textPoint(it);
     if(!Number.isFinite(p.x)||!Number.isFinite(p.y))continue;
 
     const numeric=/^\d{1,3}$/.test(raw);
     const shortAlpha=/^[A-Z]{1,3}$/i.test(raw);
     const mzLike=/^(MZ|MZA|MANZANA)\s*[A-Z0-9-]{0,5}$/i.test(raw);
-    const streetLike=isStreetLabel(raw);
+    const streetLike=isStreetLabel(raw,orig);
 
     const t=document.createElementNS(NS,'text');
     t.textContent=raw;
@@ -168,7 +175,7 @@ function buildReadableLabels(){
   svg.appendChild(overlayGroup);svg.appendChild(streetGroup);
   updateOverlaySizes();
   const info=$('info');
-  info.innerHTML+=`<br><span class="good">${overlayLabels.length.toLocaleString('es-PE')} etiquetas legibles.</span><br><span class="good">${streetLabels.length.toLocaleString('es-PE')} nombres de vía detectados.</span>`;
+  info.innerHTML+=`<br><span class="good">${overlayLabels.length.toLocaleString('es-PE')} etiquetas legibles.</span><br><span class="good">${streetLabels.length.toLocaleString('es-PE')} rótulos de calles/vías detectados.</span>`;
 }
 
 function enhanceLabels(on=true){
