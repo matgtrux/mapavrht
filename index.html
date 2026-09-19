@@ -20,7 +20,7 @@ header{background:#0d1b2a;color:#fff;padding:12px 18px;display:flex;justify-cont
 </aside><main><div id="stage"><div id="svgHost"></div><div id="empty" class="empty"><div><b>Cargando plano…</b><div class="small" style="margin-top:6px">En cuanto termine podrás buscar manzanas, lotes y textos.</div></div></div></div><div class="toolbar"><button id="zin">+</button><button id="zout">−</button><button id="home">⌂</button></div></main></div>
 <script type="module">
 import { Dwg_File_Type, LibreDwg } from 'https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/dist/libredwg-web.js';
-const WASM_BASE='https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.7.14/wasm/';
+const WASM_BASE='.';
 const $=id=>document.getElementById(id); const norm=s=>(s??'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9]+/gi,' ').trim().toUpperCase();
 let libredwg=null,svg=null,originalVB=null,vb=null,textItems=[],selected=[];
 function setStatus(t,c=''){$('headerStatus').textContent=t;$('headerStatus').className='subtitle '+c}
